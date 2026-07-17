@@ -11,7 +11,6 @@ const progressBarFill = document.getElementById('progress-bar-fill');
 const logWindow = document.getElementById('log-window');
 
 let selectedPath = '';
-let unsubscribeProgress = null;
 
 // 新增日誌至日誌視窗
 function appendLog(message, type = 'info') {
@@ -58,36 +57,6 @@ btnExecute.addEventListener('click', async () => {
   const recursive = recursiveToggle.checked;
   appendLog(`啟動轉檔任務，目標：${selectedPath} (遞迴：${recursive ? '啟用' : '停用'})`, 'info');
 
-  // 2. 註冊進度更新回呼
-  if (unsubscribeProgress) unsubscribeProgress();
-  
-  unsubscribeProgress = window.electronAPI.onConversionProgress((data) => {
-    const { current, total, status, details } = data;
-    
-    if (status === 'scanning') {
-      progressStatusText.innerText = details;
-    } else if (status === 'processing') {
-      progressStatusText.innerText = `正在轉換 [${current}/${total}]...`;
-      const percent = total > 0 ? Math.round((current / total) * 100) : 0;
-      progressBarFill.style.width = `${percent}%`;
-      progressPercent.innerText = `${percent}%`;
-    } else if (status === 'progress') {
-      // 成功轉換一個檔案
-      appendLog(`✅ 成功轉檔並移動原始檔：${details}`, 'success');
-    } else if (status === 'error') {
-      // 某個檔案發生錯誤
-      appendLog(`❌ 轉檔失敗：${details}`, 'error');
-    } else if (status === 'complete') {
-      progressStatusText.innerText = '轉檔完成！';
-      progressBarFill.style.width = '100%';
-      progressPercent.innerText = '100%';
-      appendLog(details, 'success');
-    } else if (status === 'failed') {
-      progressStatusText.innerText = '執行失敗！';
-      appendLog(details, 'error');
-    }
-  });
-
   // 3. 呼叫後端開始執行
   try {
     const result = await window.electronAPI.startConversion({
@@ -111,9 +80,42 @@ btnExecute.addEventListener('click', async () => {
     btnExecute.disabled = false;
     btnSelectFolder.disabled = false;
     recursiveToggle.disabled = false;
-    if (unsubscribeProgress) {
-      unsubscribeProgress();
-      unsubscribeProgress = null;
-    }
   }
 });
+
+// 全域註冊進度更新回呼，避免每次點擊重複註冊與 finally 的非同步競爭
+window.electronAPI.onConversionProgress((data) => {
+  const { current, total, status, details } = data;
+  
+  if (status === 'scanning') {
+    progressStatusText.innerText = details;
+  } else if (status === 'processing') {
+    // current 代表已處理完的個數，因此目前正在處理第 current + 1 個
+    progressStatusText.innerText = `正在轉換 [${current + 1}/${total}]...`;
+  } else if (status === 'progress') {
+    // 成功轉換一個檔案
+    appendLog(`✅ 成功轉檔並移動原始檔：${details}`, 'success');
+    
+    // 更新進度條
+    const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+    progressBarFill.style.width = `${percent}%`;
+    progressPercent.innerText = `${percent}%`;
+  } else if (status === 'error') {
+    // 某個檔案發生錯誤
+    appendLog(`❌ 轉檔失敗：${details}`, 'error');
+    
+    // 錯誤時也要更新進度條，使進度條持續推進
+    const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+    progressBarFill.style.width = `${percent}%`;
+    progressPercent.innerText = `${percent}%`;
+  } else if (status === 'complete') {
+    progressStatusText.innerText = '轉檔完成！';
+    progressBarFill.style.width = '100%';
+    progressPercent.innerText = '100%';
+    appendLog(details, 'success');
+  } else if (status === 'failed') {
+    progressStatusText.innerText = '執行失敗！';
+    appendLog(details, 'error');
+  }
+});
+
