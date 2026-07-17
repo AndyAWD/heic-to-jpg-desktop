@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HEIC to JPG Converter</title>
+  <!-- 引入 Google Fonts Outfit 與 Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
+  <!-- 視窗拖曳頂欄 (適用 macOS titleBarStyle: 'hiddenInset') -->
+  <div class="titlebar">
+    <span class="titlebar-text">HEIC 無損轉檔工具</span>
+  </div>
+
+  <div class="container">
+    <!-- 主題標頭 -->
+    <header class="app-header">
+      <h1 class="app-title">HEIC <span>to</span> JPG</h1>
+      <p class="app-subtitle">無損轉檔與 EXIF 資訊保留工具</p>
+    </header>
+
+    <!-- 操作面板 -->
+    <main class="app-panel">
+      <!-- 選擇資料夾 -->
+      <div class="form-group">
+        <label class="form-label" for="folder-path-input">目標資料夾</label>
+        <div class="input-group">
+          <input type="text" id="folder-path-input" placeholder="請點選右側按鈕選擇資料夾..." readonly>
+          <button type="button" id="btn-select-folder" class="btn btn-secondary" id="btn-select">選擇資料夾</button>
+        </div>
+      </div>
+
+      <!-- 開關選項 (Toggle) -->
+      <div class="form-group flex-row">
+        <div class="toggle-info">
+          <span class="toggle-label">遞迴處理子資料夾</span>
+          <span class="toggle-desc">同時轉換目標資料夾內所有子目錄下的 HEIC 檔案</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="recursive-toggle">
+          <span class="slider round"></span>
+        </label>
+      </div>
+
+      <!-- 執行按鈕 -->
+      <button type="button" id="btn-execute" class="btn btn-primary btn-block" disabled>開始執行轉換</button>
+    </main>
+
+    <!-- 狀態與進度面板 (預設隱藏，執行時顯示) -->
+    <section id="progress-panel" class="status-panel hidden">
+      <div class="progress-header">
+        <span id="progress-status-text">正在初始化...</span>
+        <span id="progress-percent">0%</span>
+      </div>
+      <div class="progress-bar-container">
+        <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%"></div>
+      </div>
+      
+      <!-- 日誌輸出視窗 -->
+      <div class="log-container">
+        <div id="log-window" class="log-window"></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- 引入 Renderer 邏輯 -->
+  <script src="../renderer.js"></script>
+</body>
+</html>

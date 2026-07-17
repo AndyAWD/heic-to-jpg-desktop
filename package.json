@@ -1,0 +1,23 @@
+{
+  "name": "heic-to-jpg-desktop",
+  "version": "1.0.0",
+  "description": "HEIC to JPG converter with GUI (Electron) and CLI supporting EXIF retention and no compression",
+  "main": "src/index.js",
+  "bin": {
+    "heic-to-jpg-desktop": "./src/cli.js"
+  },
+  "scripts": {
+    "start": "electron .",
+    "cli": "node src/cli.js"
+  },
+  "dependencies": {
+    "heic-jpg-exif": "^1.0.2",
+    "commander": "^11.1.0",
+    "inquirer": "^9.2.12",
+    "ora": "^5.4.1",
+    "chalk": "^4.1.2"
+  },
+  "devDependencies": {
+    "electron": "^28.2.0"
+  }
+}
