@@ -61,13 +61,14 @@ async function safeConvert(inputPath, outputPath, quality = 1) {
       exif = formatTypes('Exif', exif);
       gps = formatTypes('GPS', gps);
 
-      ifd0[piexif.TagValues.ImageIFD.Orientation] = 1;
-      if (ifd0[piexif.TagValues.ImageIFD.Orientation] > 4) {
+      const origOrientation = ifd0[piexif.TagValues.ImageIFD.Orientation];
+      if (origOrientation > 4) {
         const xd = exif[piexif.TagValues.ExifIFD.PixelXDimension];
         const yd = exif[piexif.TagValues.ExifIFD.PixelYDimension];
         exif[piexif.TagValues.ExifIFD.PixelXDimension] = yd;
         exif[piexif.TagValues.ExifIFD.PixelYDimension] = xd;
       }
+      ifd0[piexif.TagValues.ImageIFD.Orientation] = 1;
 
       const exifBytes = piexif.dump({
         '0th': ifd0,
@@ -101,17 +102,35 @@ async function safeConvert(inputPath, outputPath, quality = 1) {
     }
   }
 
+  let result;
   if (outputPath) {
     await fs.writeFile(outputPath, newJpeg);
+    result = null;
   } else {
-    return newJpeg;
+    result = newJpeg;
+  }
+
+  // 釋放大型 Buffer 參考，協助 V8 引擎快速回收記憶體
+  newJpeg = null;
+  return result;
+}
+
+/**
+ * 輔助函式：非同步檢查檔案是否存在
+ */
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
   }
 }
 
 /**
  * 尋找一個在「原地 JPG」與「heic/ 資料夾中 HEIC」均不衝突的檔名
  */
-function getUniqueBaseName(parentDir, baseName) {
+async function getUniqueBaseName(parentDir, baseName) {
   const heicSubDir = path.join(parentDir, 'heic');
   let targetBase = baseName;
   let counter = 1;
@@ -121,7 +140,13 @@ function getUniqueBaseName(parentDir, baseName) {
     const heicPath = path.join(heicSubDir, `${targetBase}.heic`);
     const heifPath = path.join(heicSubDir, `${targetBase}.heif`);
 
-    if (!existsSync(jpgPath) && !existsSync(heicPath) && !existsSync(heifPath)) {
+    const [jpgExists, heicExists, heifExists] = await Promise.all([
+      fileExists(jpgPath),
+      fileExists(heicPath),
+      fileExists(heifPath)
+    ]);
+
+    if (!jpgExists && !heicExists && !heifExists) {
       return targetBase;
     }
     targetBase = `${baseName}_${counter}`;
@@ -165,7 +190,7 @@ async function convertSingleFile(filePath) {
   await fs.mkdir(heicDir, { recursive: true });
 
   // 取得不衝突的主檔名
-  const targetBaseName = getUniqueBaseName(dir, originalBase);
+  const targetBaseName = await getUniqueBaseName(dir, originalBase);
   const outputJpgPath = path.join(dir, `${targetBaseName}.jpg`);
   const movedHeicPath = path.join(heicDir, `${targetBaseName}${ext.toLowerCase()}`);
 
@@ -173,8 +198,17 @@ async function convertSingleFile(filePath) {
     // 呼叫我們自己實作的防禦性 safeConvert 轉檔
     await safeConvert(filePath, outputJpgPath, 1);
 
-    // 將原始檔搬移到 heic 子目錄下
-    await fs.rename(filePath, movedHeicPath);
+    // 將原始檔搬移到 heic 子目錄下，實作跨裝置搬移 fallback (EXDEV)
+    try {
+      await fs.rename(filePath, movedHeicPath);
+    } catch (renameErr) {
+      if (renameErr.code === 'EXDEV') {
+        await fs.copyFile(filePath, movedHeicPath);
+        await fs.unlink(filePath);
+      } else {
+        throw renameErr;
+      }
+    }
 
     return {
       success: true,
@@ -206,28 +240,51 @@ async function runConversion(dirPath, recursive, onProgress = () => {}) {
       return { total: 0, processed: 0, results: [] };
     }
 
-    const results = [];
+    const results = new Array(total);
     let processed = 0;
 
-    for (const file of files) {
-      const fileName = path.basename(file);
-      onProgress(processed, total, 'processing', `正在轉換：${fileName}`);
-      
-      try {
-        const res = await convertSingleFile(file);
-        results.push(res);
+    // 併發限制：CPU 核心數減 1，且最少為 1
+    const cpus = require('os').cpus().length;
+    const limit = Math.max(1, cpus - 1);
+
+    let fileIndex = 0;
+
+    async function worker() {
+      while (fileIndex < total) {
+        const currentIndex = fileIndex++;
+        const file = files[currentIndex];
+        const fileName = path.basename(file);
+
+        onProgress(processed, total, 'processing', `正在轉換：${fileName}`);
+
+        try {
+          const res = await convertSingleFile(file);
+          results[currentIndex] = res;
+        } catch (err) {
+          results[currentIndex] = {
+            success: false,
+            original: file,
+            error: err.message || err
+          };
+        }
+
         processed++;
-        onProgress(processed, total, 'progress', fileName);
-      } catch (err) {
-        results.push({
-          success: false,
-          original: file,
-          error: err.message || err
-        });
-        processed++;
-        onProgress(processed, total, 'error', `${fileName} (${err.message || err})`);
+        const currentResult = results[currentIndex];
+        if (currentResult.success) {
+          onProgress(processed, total, 'progress', fileName);
+        } else {
+          onProgress(processed, total, 'error', `${fileName} (${currentResult.error})`);
+        }
       }
     }
+
+    // 同時啟動最多 limit 個 worker
+    const workers = [];
+    for (let i = 0; i < Math.min(limit, total); i++) {
+      workers.push(worker());
+    }
+
+    await Promise.all(workers);
 
     onProgress(total, total, 'complete', `轉換完成！共處理了 ${total} 個檔案。`);
     return { total, processed, results };

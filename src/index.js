@@ -26,6 +26,7 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+    app.quit(); // 強制退出，防止背景有非同步轉檔任務懸空
   });
 }
 
@@ -38,7 +39,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  app.quit(); // 強制退出所有平台
 });
 
 // IPC 監聽：選擇資料夾
@@ -57,14 +58,18 @@ ipcMain.handle('select-directory', async () => {
 ipcMain.handle('start-conversion', async (event, { dirPath, recursive }) => {
   try {
     const results = await runConversion(dirPath, recursive, (current, total, status, details) => {
-      // 即時把進度發送給前端 Renderer
-      if (mainWindow) {
-        mainWindow.webContents.send('conversion-progress', {
-          current,
-          total,
-          status,
-          details
-        });
+      // 即時把進度發送給前端 Renderer，防禦視窗已被銷毀的極限狀況
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        try {
+          mainWindow.webContents.send('conversion-progress', {
+            current,
+            total,
+            status,
+            details
+          });
+        } catch (sendErr) {
+          console.warn('Failed to send progress event (window might be closing):', sendErr);
+        }
       }
     });
     return { success: true, ...results };

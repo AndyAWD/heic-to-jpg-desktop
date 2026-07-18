@@ -12,13 +12,19 @@ const logWindow = document.getElementById('log-window');
 
 let selectedPath = '';
 
-// 新增日誌至日誌視窗
+// 新增日誌至日誌視窗，使用 textContent 與 textNode 防禦 DOM-based XSS 漏洞
 function appendLog(message, type = 'info') {
   const logItem = document.createElement('div');
   logItem.className = `log-item log-${type}`;
   
   const timestamp = new Date().toLocaleTimeString();
-  logItem.innerHTML = `<span>[${timestamp}]</span> ${message}`;
+  
+  const timeSpan = document.createElement('span');
+  timeSpan.textContent = `[${timestamp}]`;
+  logItem.appendChild(timeSpan);
+  
+  const messageNode = document.createTextNode(` ${message}`);
+  logItem.appendChild(messageNode);
   
   logWindow.appendChild(logItem);
   logWindow.scrollTop = logWindow.scrollHeight;
@@ -84,7 +90,7 @@ btnExecute.addEventListener('click', async () => {
 });
 
 // 全域註冊進度更新回呼，避免每次點擊重複註冊與 finally 的非同步競爭
-window.electronAPI.onConversionProgress((data) => {
+const unsubscribe = window.electronAPI.onConversionProgress((data) => {
   const { current, total, status, details } = data;
   
   if (status === 'scanning') {
@@ -116,6 +122,13 @@ window.electronAPI.onConversionProgress((data) => {
   } else if (status === 'failed') {
     progressStatusText.innerText = '執行失敗！';
     appendLog(details, 'error');
+  }
+});
+
+// 在視窗卸載前，清除 preload 中 onConversionProgress 返回的事件監聽器，防止 Listener 洩漏
+window.addEventListener('beforeunload', () => {
+  if (typeof unsubscribe === 'function') {
+    unsubscribe();
   }
 });
 
